@@ -105,7 +105,7 @@ inside nano hosts:
 
 [webserver]
 
-<pvt IP of host-server-1>
+(pvt IP of host-server-1)
 
 visudo
 
@@ -145,9 +145,9 @@ ls -la
 
 cd .ssh
 
-ssh-copy-id ansible@<ip of host-1>
+ssh-copy-id ansible@(ip of host-1)
 
-ssh <pvt IP of host-1>
+ssh (pvt IP of host-1)
 
 ansible webserver -m ping
 
@@ -172,21 +172,25 @@ vi /opt/tomcat/apache-tomcat-9.0.118/conf/tomcat-users.xml
 Add:
 xml
 
-<tomcat-users>
+(
+  <tomcat-users>
   <role rolename="manager-gui"/>
   <role rolename="admin-gui"/>
   <user username="admin" password="Admin@123" roles="manager-gui,admin-gui"/>
 </tomcat-users>
+)
 
 vi /opt/tomcat/apache-tomcat-9.0.118/webapps/manager/META-INF/context.xml
 
 ### COMMENT THIS:
 
 xml
+(
 <!--
 <Valve className="org.apache.catalina.valves.RemoteAddrValve"
        allow="127\.\d+\.\d+\.\d+|::1"/>
 -->
+)
 
 /opt/tomcat/apache-tomcat-9.0.118/bin/startup.sh
 
@@ -296,7 +300,7 @@ SonarQube
 
 Server URL:
 
-http://<SONAR_PRIVATE_IP>:9000
+http://(SONAR_PRIVATE_IP):9000
 
 Generate Sonar token in SonarQube.
 
@@ -311,7 +315,7 @@ git clone https://github.com/Msocial123/EcommerceApp.git
 cd EcommerceApp/EcommerceApp
 
 NEW POM.XML
-<project xmlns="http://maven.apache.org/POM/4.0.0"
+<!-- <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -398,7 +402,8 @@ NEW POM.XML
             </plugin>
         </plugins>
     </build>
-</project>
+</project> 
+-->
 
 mvn clean package
 
@@ -408,6 +413,7 @@ WILL COME TO ROOT USER
 
 sudo vi /etc/ansible/deploy.yaml
 
+<!-- 
 ---
 - hosts: webserver
   become: yes
@@ -424,7 +430,9 @@ sudo vi /etc/ansible/deploy.yaml
         src: /var/lib/jenkins/workspace/EcommerceApp/EcommerceApp/target/EcommerceApp.war
         dest: /opt/tomcat/apache-tomcat-9.0.118/webapps/EcommerceApp.war
     - name: Start Tomcat
-      shell: /opt/tomcat/apache-tomcat-9.0.118/bin/startup.sh
+      shell: /opt/tomcat/apache-tomcat-9.0.118/bin/startup.sh 
+
+-->
 
 COME TO JENKINS:8080
 
