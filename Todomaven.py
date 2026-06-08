@@ -565,3 +565,173 @@ pipeline {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+pipeline {
+agent any
+
+tools {
+    maven 'Maven3'
+}
+
+environment {
+    APP_NAME = "maven-web-application"
+    WAR_FILE = "target/maven-web-application.war"
+    TEMP_WAR = "/tmp/maven-web-application.war"
+}
+
+stages {
+
+    stage('Checkout') {
+        steps {
+            git branch: 'main',
+                url: 'https://github.com/jeevan0024/maven-web-application.git'
+        }
+    }
+
+    stage('Build') {
+        steps {
+            sh 'mvn clean package'
+        }
+    }
+
+    stage('SonarQube Analysis') {
+        steps {
+            withSonarQubeEnv('SonarQube') {
+                sh '''
+                mvn sonar:sonar \
+                -Dsonar.projectKey=maven-web-application \
+                -Dsonar.projectName=maven-web-application \
+                -Dsonar.host.url=http://<SONAR_PRIVATE_IP>:9000 \
+                -Dsonar.login=<SONAR_TOKEN>
+                '''
+            }
+        }
+    }
+
+    stage('Quality Gate') {
+        steps {
+            timeout(time: 5, unit: 'MINUTES') {
+                waitForQualityGate abortPipeline: true
+            }
+        }
+    }
+
+    stage('Prepare Artifact') {
+        steps {
+            sh """
+            ls -l target
+            cp ${WAR_FILE} ${TEMP_WAR}
+            """
+        }
+    }
+
+    stage('Deploy via Ansible') {
+        steps {
+            sh '''
+            sudo -u ansible ansible-playbook -i /etc/ansible/hosts /etc/ansible/deploy.yaml
+            '''
+        }
+    }
+
+    stage('Health Check') {
+        steps {
+            sh '''
+            sleep 20
+            curl -I http://3.25.233.220:8080/maven-web-application
+            '''
+        }
+    }
+}
+
+post {
+    success {
+        echo "Deployment SUCCESS 🚀"
+    }
+
+    failure {
+        echo "Pipeline FAILED ❌"
+    }
+}
+
+}
