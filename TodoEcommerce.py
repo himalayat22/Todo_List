@@ -260,6 +260,10 @@ cd /opt/sonarqube/bin/linux-x86-64
 
 tail -f /opt/sonarqube/logs/sonar.log
 
+use "user token" not "project token"
+
+then generate
+
 JENKINS CONFIGURATION
 
 Install Plugins:
