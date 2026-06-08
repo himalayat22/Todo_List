@@ -283,6 +283,8 @@ Name:
 Maven3
 
 Install automatically.
+
+add sonar-scanner
 ________________________________________
 
 SONARQUBE CONFIGURATION

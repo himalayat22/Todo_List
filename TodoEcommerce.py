@@ -288,6 +288,8 @@ Name:
 
 Maven3
 
+Add sonar-scanner
+
 Install automatically.
 ________________________________________
 
