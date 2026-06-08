@@ -1,156 +1,230 @@
-Based on everything you've shown, here's the **clean, correct end-to-end process** for your GitOps/AIOps assessment using:
 
-* GitHub
-* GitHub Actions
-* Docker Hub
-* EKS
-* Helm
-* ArgoCD
-* Argo Rollouts
 
----
+# Phase 1 – Create Ubuntu EC2
 
-# Phase 1: Prepare the Application
+Launch:
 
-## Step 1: Clone Repository
+```text
+AMI: Ubuntu Server 24.04 LTS
+Instance Type: t3.small
 
-On your EC2 instance:
+Storage:
+30 GB gp3
+
+Security Group:
+22 SSH
+80 HTTP
+443 HTTPS
+8080 (optional)
+```
+
+Connect:
 
 ```bash
-git clone https://github.com/Msocial123/Shine-GitOps-Project.git
-cd Shine-GitOps-Project
+ssh -i key.pem ubuntu@PUBLIC_IP
 ```
 
 ---
 
-## Step 2: Test Docker Build
+# Update Server
 
 ```bash
-docker build -t shine-app .
+sudo apt update
+sudo apt upgrade -y
+```
+
+---
+
+# Install Git
+
+```bash
+sudo apt install git -y
 ```
 
 Verify:
 
 ```bash
-docker images
+git --version
 ```
 
 ---
 
-## Step 3: Push Image to Docker Hub
-
-Login:
+# Install Docker
 
 ```bash
-docker login
+curl -fsSL https://get.docker.com | sudo sh
 ```
 
-Tag image:
+Add user:
 
 ```bash
-docker tag shine-app YOUR_DOCKERHUB_USERNAME/shine-app:latest
+sudo usermod -aG docker ubuntu
 ```
 
-Push:
+Apply:
 
 ```bash
-docker push YOUR_DOCKERHUB_USERNAME/shine-app:latest
+newgrp docker
+```
+
+Verify:
+
+```bash
+docker version
 ```
 
 ---
 
-## Step 4: Update Helm Chart
-
-Edit:
+# Install AWS CLI
 
 ```bash
-nano Retail-chart/values.yaml
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
 ```
 
-Change:
+```bash
+sudo apt install unzip -y
+```
+
+```bash
+unzip awscliv2.zip
+```
+
+```bash
+sudo ./aws/install
+```
+
+Verify:
+
+```bash
+aws --version
+```
+
+---
+
+# Configure AWS
+
+```bash
+aws configure
+```
+
+Enter:
+
+```text
+Access Key
+Secret Key
+Region
+Output=json
+```
+
+Verify:
+
+```bash
+aws sts get-caller-identity
+```
+
+---
+
+# Install kubectl
+
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s \
+https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+```
+
+```bash
+chmod +x kubectl
+```
+
+```bash
+sudo mv kubectl /usr/local/bin/
+```
+
+Verify:
+
+```bash
+kubectl version --client
+```
+
+---
+
+# Install eksctl
+
+```bash
+curl --silent --location \
+"https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" \
+| tar xz -C /tmp
+```
+
+```bash
+sudo mv /tmp/eksctl /usr/local/bin
+```
+
+Verify:
+
+```bash
+eksctl version
+```
+
+---
+
+# Install Helm
+
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+Verify:
+
+```bash
+helm version
+```
+
+---
+
+# Create EKS Cluster
+
+Create file:
 
 ```yaml
-userprofile:
-  image: YOUR_DOCKERHUB_USERNAME/shine-app:latest
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: shine-cluster
+  region: ap-south-1
+
+managedNodeGroups:
+  - name: shine-devops-ng
+    instanceType: t3.small
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 3
+
+    ssh:
+      allow: true
 ```
 
-Save.
-
-Commit:
+Save as:
 
 ```bash
-git add .
-git commit -m "Updated image"
-git push origin main
+cluster.yaml
+```
+
+Create cluster:
+
+```bash
+eksctl create cluster -f cluster.yaml
+```
+
+Time:
+
+```text
+20–30 minutes
 ```
 
 ---
 
-# Phase 2: Configure GitHub Actions
-
-## Step 5: Create Docker Hub Access Token
-
-Docker Hub → Account Settings → Security → Access Tokens
-
-Create token.
-
----
-
-## Step 6: Add GitHub Secrets
-
-GitHub Repository:
-
-Settings → Secrets and Variables → Actions
-
-Add:
-
-```text
-DOCKER_USERNAME
-```
-
-Value:
-
-```text
-your dockerhub username
-```
-
-Add:
-
-```text
-DOCKER_PASSWORD
-```
-
-Value:
-
-```text
-dockerhub access token
-```
-
----
-
-## Step 7: Verify Workflow
-
-File:
-
-```text
-.github/workflows/*.yml
-```
-
-Workflow should:
-
-```text
-Build Docker Image
-Login to DockerHub
-Push Docker Image
-```
-
-Commit and push.
-
----
-
-# Phase 3: Create EKS Cluster
-
-## Step 8: Verify EKS
+# Verify Cluster
 
 ```bash
 kubectl get nodes
@@ -159,17 +233,24 @@ kubectl get nodes
 Expected:
 
 ```text
-Ready
+ip-xxx Ready
+ip-xxx Ready
 ```
-
-nodes should be visible.
 
 ---
 
-## Step 9: Create Namespace
+# Create Namespaces
 
 ```bash
-kubectl create namespace shine
+kubectl create namespace production
+```
+
+```bash
+kubectl create namespace argocd
+```
+
+```bash
+kubectl create namespace monitoring
 ```
 
 Verify:
@@ -180,17 +261,7 @@ kubectl get ns
 
 ---
 
-# Phase 4: Install ArgoCD
-
-## Step 10: Create Namespace
-
-```bash
-kubectl create namespace argocd
-```
-
----
-
-## Step 11: Install ArgoCD
+# Install ArgoCD
 
 ```bash
 kubectl apply -n argocd \
@@ -203,315 +274,9 @@ Wait:
 kubectl get pods -n argocd
 ```
 
-All should be Running.
-
----
-
-## Step 12: Expose ArgoCD
-
-```bash
-kubectl patch svc argocd-server \
--n argocd \
--p '{"spec":{"type":"LoadBalancer"}}'
-```
-
-Check:
-
-```bash
-kubectl get svc -n argocd
-```
-
-Note External IP / DNS.
-
----
-
-## Step 13: Get Password
-
-```bash
-argocd admin initial-password -n argocd
-```
-
-Username:
+All should be:
 
 ```text
-admin
+Running
 ```
 
-Password:
-
-```text
-output of command
-```
-
----
-
-## Step 14: Open ArgoCD
-
-Browser:
-
-```text
-http://<ARGOCD-LOADBALANCER>
-```
-
-Login.
-
----
-
-# Phase 5: Install Argo Rollouts
-
-Your chart contains:
-
-```text
-userprofile-rollout.yml
-```
-
-Therefore Rollouts must be installed.
-
----
-
-## Step 15: Install Rollouts
-
-```bash
-kubectl create namespace argo-rollouts
-```
-
-```bash
-kubectl apply -n argo-rollouts \
--f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
-```
-
-Verify:
-
-```bash
-kubectl get pods -n argo-rollouts
-```
-
----
-
-## Step 16: Verify CRD
-
-```bash
-kubectl get crd | grep rollout
-```
-
-Expected:
-
-```text
-rollouts.argoproj.io
-```
-
----
-
-# Phase 6: Create ArgoCD Application
-
-Inside ArgoCD UI:
-
----
-
-### General
-
-```text
-Application Name:
-shine-app
-
-Project:
-default
-
-Sync Policy:
-Automatic
-```
-
-Enable:
-
-```text
-Auto Create Namespace
-Prune Resources
-Self Heal
-```
-
----
-
-### Source
-
-```text
-Repository URL:
-https://github.com/Msocial123/Shine-GitOps-Project.git
-
-Revision:
-HEAD
-
-Path:
-Retail-chart
-```
-
----
-
-### Destination
-
-```text
-Cluster:
-https://kubernetes.default.svc
-
-Namespace:
-shine
-```
-
----
-
-Click:
-
-```text
-Create
-```
-
----
-
-# Phase 7: Sync Application
-
-Click:
-
-```text
-SYNC
-```
-
-Then:
-
-```text
-SYNCHRONIZE
-```
-
-Wait until:
-
-```text
-Healthy
-Synced
-```
-
----
-
-# Phase 8: Verify Deployment
-
-Check:
-
-```bash
-kubectl get pods -n shine
-```
-
-Expected:
-
-```text
-mongodb-deployment
-userprofile-rollout
-```
-
-Running.
-
----
-
-Check services:
-
-```bash
-kubectl get svc -n shine
-```
-
-Expected:
-
-```text
-mongodb-service
-usernode-service
-```
-
----
-
-# Phase 9: Get Application URL
-
-```bash
-kubectl get svc -n shine
-```
-
-Look for:
-
-```text
-EXTERNAL-IP
-```
-
-Open:
-
-```text
-http://<external-ip>
-```
-
-Application should load.
-
----
-
-# If Helm Gives Errors
-
-Since you've already seen:
-
-```text
-userprofile-secret exists
-```
-
-Clean the namespace before retrying Helm tests:
-
-```bash
-kubectl delete secret userprofile-secret -n shine
-```
-
-or
-
-```bash
-kubectl delete namespace shine
-kubectl create namespace shine
-```
-
-Then:
-
-```bash
-helm install shine-app ./Retail-chart -n shine
-```
-
----
-
-# Evidence/Screenshots for Report
-
-Take screenshots of:
-
-1. GitHub Repository
-2. GitHub Actions successful run
-3. Docker Hub image
-4. EKS Nodes
-
-```bash
-kubectl get nodes
-```
-
-5. ArgoCD Dashboard showing:
-
-```text
-Healthy
-Synced
-```
-
-6. Rollout resources
-
-```bash
-kubectl get rollouts -n shine
-```
-
-7. Pods
-
-```bash
-kubectl get pods -n shine
-```
-
-8. Services
-
-```bash
-kubectl get svc -n shine
-```
-
-9. Application running in browser
-
-This is the complete workflow your project structure is designed to follow. The key thing now is **don't mix Helm manual deployment and ArgoCD deployment in the same namespace**. For the assessment, use **ArgoCD as the deployment method** after installing Argo Rollouts.
