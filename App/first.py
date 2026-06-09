@@ -183,38 +183,15 @@ helm version
 
 # Create EKS Cluster
 
-Create file:
-
-```yaml
-apiVersion: eksctl.io/v1alpha5
-kind: ClusterConfig
-
-metadata:
-  name: shine-cluster
-  region: ap-south-1
-
-managedNodeGroups:
-  - name: shine-devops-ng
-    instanceType: t3.small
-    desiredCapacity: 2
-    minSize: 2
-    maxSize: 3
-
-    ssh:
-      allow: true
-```
-
-Save as:
-
-```bash
-cluster.yaml
-```
-
-Create cluster:
-
-```bash
-eksctl create cluster -f cluster.yaml
-```
+eksctl create cluster \
+    --name fss-retail-cluster \
+    --region ap-southeast-2 \
+    --nodegroup-name fss-retail-nodes \
+    --node-type t3.small \
+    --nodes 4 \
+    --nodes-min 3 \
+    --nodes-max 5 \
+    --managed
 
 Time:
 
