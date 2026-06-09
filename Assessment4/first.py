@@ -280,3 +280,69 @@ All should be:
 Running
 ```
 
+
+
+
+
+
+
+
+
+Agent.py
+
+1. Create project directory
+mkdir ai-troubleshooter
+cd ai-troubleshooter
+2. Create Python virtual environment
+sudo apt update
+sudo apt install -y python3-venv
+
+python3 -m venv venv
+source venv/bin/activate
+
+You should now see:
+
+(venv) ubuntu@ip-xxx:~/ai-troubleshooter$
+3. Upgrade pip
+pip install --upgrade pip
+4. Install Groq SDK
+pip install groq
+5. Create requirements.txt
+cat > requirements.txt << 'EOF'
+groq>=0.30.0
+EOF
+6. Install from requirements
+pip install -r requirements.txt
+7. Create the Python file
+nano agent.py
+
+Paste the Groq code into the file.
+
+Save:
+
+CTRL + O
+ENTER
+CTRL + X
+8. Set Groq API Key
+
+Replace with your actual key.
+
+export GROQ_API_KEY="gsk_your_actual_key_here"
+
+Verify:
+
+echo $GROQ_API_KEY
+9. Verify Kubernetes access
+kubectl cluster-info
+
+Check pods:
+
+kubectl get pods -n fss-clu
+
+If your namespace is different:
+
+kubectl get ns
+10. Test the retail pod label
+kubectl get pods -n fss-clu -l app=retail
+11. Run the AI Troubleshooter
+python3 agent.py
