@@ -222,63 +222,7 @@ Time:
 20–30 minutes
 ```
 
----
 
-# Verify Cluster
-
-```bash
-kubectl get nodes
-```
-
-Expected:
-
-```text
-ip-xxx Ready
-ip-xxx Ready
-```
-
----
-
-# Create Namespaces
-
-```bash
-kubectl create namespace production
-```
-
-```bash
-kubectl create namespace argocd
-```
-
-```bash
-kubectl create namespace monitoring
-```
-
-Verify:
-
-```bash
-kubectl get ns
-```
-
----
-
-# Install ArgoCD
-
-```bash
-kubectl apply -n argocd \
--f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-```
-
-Wait:
-
-```bash
-kubectl get pods -n argocd
-```
-
-All should be:
-
-```text
-Running
-```
 
 
 
