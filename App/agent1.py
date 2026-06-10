@@ -1,15 +1,13 @@
 import subprocess
 import os
 import json
-from datetime import datetime
 from groq import Groq
-
 
 NAMESPACE = "retail"
 
 
 # -----------------------------
-# SAFE KUBECTL RUNNER
+# SAFE COMMAND RUNNER
 # -----------------------------
 def run_cmd(cmd):
     try:
@@ -17,87 +15,127 @@ def run_cmd(cmd):
             cmd,
             capture_output=True,
             text=True,
-            timeout=30,
-            check=False,
+            timeout=30
         )
         return result.stdout.strip()
     except Exception as e:
         return f"ERROR: {str(e)}"
 
 
+def run_json(cmd):
+    output = run_cmd(cmd)
+    try:
+        return json.loads(output)
+    except:
+        return {}
+
+
 # -----------------------------
-# KUBERNETES DATA COLLECTION
+# K8S DATA (JSON BASED)
 # -----------------------------
 def get_pods():
-    return run_cmd(["kubectl", "get", "pods", "-n", NAMESPACE, "-o", "wide"])
+    return run_json(["kubectl", "get", "pods", "-n", NAMESPACE, "-o", "json"])
 
 
 def get_services():
-    return run_cmd(["kubectl", "get", "svc", "-n", NAMESPACE])
+    return run_json(["kubectl", "get", "svc", "-n", NAMESPACE, "-o", "json"])
 
 
 def get_deployments():
-    return run_cmd(["kubectl", "get", "deployments", "-n", NAMESPACE])
+    return run_json(["kubectl", "get", "deployments", "-n", NAMESPACE, "-o", "json"])
 
 
 def get_endpoints():
-    return run_cmd(["kubectl", "get", "endpoints", "-n", NAMESPACE])
+    return run_json(["kubectl", "get", "endpoints", "-n", NAMESPACE, "-o", "json"])
 
 
 def get_events():
-    return run_cmd(["kubectl", "get", "events", "-n", NAMESPACE, "--sort-by=.lastTimestamp"])
+    return run_cmd([
+        "kubectl", "get", "events",
+        "-n", NAMESPACE,
+        "--sort-by=.lastTimestamp"
+    ])
 
 
-def get_top_pods():
+def get_metrics():
     return run_cmd(["kubectl", "top", "pods", "-n", NAMESPACE])
 
 
+# -----------------------------
+# POD UTILITIES
+# -----------------------------
+def get_first_pod_name(pods_json):
+    items = pods_json.get("items", [])
+    if not items:
+        return None
+    return items[0]["metadata"]["name"]
+
+
 def get_logs(pod):
+    if not pod:
+        return "No pod found"
     return run_cmd(["kubectl", "logs", pod, "-n", NAMESPACE, "--tail=100"])
 
 
 def get_previous_logs(pod):
+    if not pod:
+        return "No pod found"
     return run_cmd([
-        "kubectl", "logs", pod, "-n", NAMESPACE,
-        "--previous", "--tail=100"
-    ])
-
-
-# -----------------------------
-# POD DETECTION
-# -----------------------------
-def get_retail_pod():
-    pod = run_cmd([
-        "kubectl", "get", "pods",
+        "kubectl", "logs", pod,
         "-n", NAMESPACE,
-        "-l", "app=retail",
-        "-o", "jsonpath={.items[0].metadata.name}"
+        "--previous",
+        "--tail=100"
     ])
-    return pod if pod else None
 
 
 # -----------------------------
-# INCIDENT DETECTION (REAL ONLY)
+# ISSUE DETECTION (REAL LOGIC)
 # -----------------------------
-def detect_issues(pods, endpoints, deployments):
+def detect_issues(pods, deployments, endpoints):
     issues = []
 
-    if "CrashLoopBackOff" in pods:
-        issues.append("CrashLoopBackOff detected")
+    # ---- POD HEALTH ----
+    for pod in pods.get("items", []):
+        name = pod["metadata"]["name"]
+        phase = pod["status"].get("phase")
 
-    if "ImagePullBackOff" in pods or "ErrImagePull" in pods:
-        issues.append("Image pull failure detected")
+        if phase != "Running":
+            issues.append(f"Pod {name} not running (phase={phase})")
 
-    if "0/1" in pods or "0/2" in pods:
-        issues.append("Pod not ready")
+        for cs in pod["status"].get("containerStatuses", []):
+            if not cs.get("ready"):
+                issues.append(f"Container not ready in pod {name}")
 
-    if "retail-app-service" in endpoints and "<none>" in endpoints:
-        issues.append("Service has no endpoints")
+            state = cs.get("state", {})
+            if "waiting" in state:
+                reason = state["waiting"].get("reason", "")
+                if reason:
+                    issues.append(f"{name} waiting: {reason}")
 
-    if "0/1" in deployments:
-        issues.append("Deployment not fully available")
+    # ---- DEPLOYMENTS ----
+    dep_items = deployments.get("items", [])
+    if not dep_items:
+        issues.append("No deployments found in namespace")
 
-    return issues
+    for dep in dep_items:
+        name = dep["metadata"]["name"]
+        desired = dep["spec"]["replicas"]
+        available = dep["status"].get("availableReplicas", 0)
+
+        if available < desired:
+            issues.append(
+                f"Deployment {name} not fully available ({available}/{desired})"
+            )
+
+    # ---- ENDPOINTS ----
+    for ep in endpoints.get("items", []):
+        name = ep["metadata"]["name"]
+        subsets = ep.get("subsets")
+
+        if not subsets:
+            issues.append(f"Service {name} has no active endpoints")
+
+    return list(set(issues))
 
 
 # -----------------------------
@@ -123,17 +161,17 @@ If issues list is empty, respond:
 If issues exist, provide:
 
 1. Detected Issues
-2. Root Cause (only if supported by evidence)
+2. Root Cause (ONLY if evidence supports it)
 3. Evidence
 4. Fix Steps
 5. kubectl validation commands
-6. Severity (Low/Medium/High/Critical)
+6. Severity
 
 ISSUES:
 {issues}
 
 EVIDENCE:
-{json.dumps(evidence, indent=2)}
+{json.dumps(evidence, indent=2)[:12000]}
 """
 
     response = client.chat.completions.create(
@@ -141,45 +179,45 @@ EVIDENCE:
         messages=[
             {
                 "role": "system",
-                "content": "You are a Kubernetes production SRE. Be strict, factual, and never hallucinate."
+                "content": "You are a strict Kubernetes SRE. No guessing."
             },
             {"role": "user", "content": prompt},
         ],
         temperature=0.1,
-        max_tokens=1500,
+        max_tokens=1200,
     )
 
     return response.choices[0].message.content
 
 
 # -----------------------------
-# MAIN AGENT
+# MAIN
 # -----------------------------
 def main():
     print("\n" + "=" * 80)
-    print("KUBERNETES AI SRE AGENT (EVIDENCE-DRIVEN)")
+    print("KUBERNETES AI SRE AGENT (PRODUCTION)")
     print("=" * 80)
-
-    pod = get_retail_pod()
 
     pods = get_pods()
     services = get_services()
     deployments = get_deployments()
     endpoints = get_endpoints()
     events = get_events()
-    metrics = get_top_pods()
+    metrics = get_metrics()
 
-    logs = get_logs(pod) if pod else "No pod found"
-    prev_logs = get_previous_logs(pod) if pod else "No pod found"
+    pod_name = get_first_pod_name(pods)
 
-    issues = detect_issues(pods, endpoints, deployments)
+    logs = get_logs(pod_name)
+    prev_logs = get_previous_logs(pod_name)
+
+    issues = detect_issues(pods, deployments, endpoints)
 
     evidence = {
         "pods": pods,
         "services": services,
         "deployments": deployments,
         "endpoints": endpoints,
-        "events": events[-2000:],  # limit size
+        "events": events[-2000:],
         "metrics": metrics,
         "logs": logs,
         "previous_logs": prev_logs,
