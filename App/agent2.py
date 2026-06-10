@@ -1,308 +1,196 @@
 import subprocess
 import os
+import json
+from datetime import datetime
 from groq import Groq
 
 
-# Automatically find the pod name matching label 'app=retail'
-def get_retail_pod_name(namespace="fss-clu"):
+NAMESPACE = "fss-clu"
+
+
+# -----------------------------
+# SAFE KUBECTL RUNNER
+# -----------------------------
+def run_cmd(cmd):
     try:
         result = subprocess.run(
-            [
-                "kubectl",
-                "get",
-                "pods",
-                "-n",
-                namespace,
-                "-l",
-                "app=retail",
-                "-o",
-                "jsonpath={.items[0].metadata.name}",
-            ],
+            cmd,
             capture_output=True,
             text=True,
-            check=True,
+            timeout=30,
+            check=False,
         )
-
-        pod_name = result.stdout.strip()
-
-        if pod_name:
-            print(f"Detected active retail pod: {pod_name}")
-            return pod_name
-
+        return result.stdout.strip()
     except Exception as e:
-        print(f"Error dynamically detecting pod via kubectl: {e}")
-
-    # Fallback: first pod in namespace
-    try:
-        result = subprocess.run(
-            [
-                "kubectl",
-                "get",
-                "pods",
-                "-n",
-                namespace,
-                "-o",
-                "jsonpath={.items[0].metadata.name}",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        pod_name = result.stdout.strip()
-
-        if pod_name:
-            print(f"Fallback detected pod: {pod_name}")
-            return pod_name
-
-    except Exception:
-        pass
-
-    print("Could not detect any pods.")
-    return "retail-app-deployment-dynamic-fallback"
+        return f"ERROR: {str(e)}"
 
 
-# Collect pod logs
-def get_logs(pod_name, namespace="fss-clu"):
-    result = subprocess.run(
-        ["kubectl", "logs", pod_name, "-n", namespace, "--tail=100"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+# -----------------------------
+# KUBERNETES DATA COLLECTION
+# -----------------------------
+def get_pods():
+    return run_cmd(["kubectl", "get", "pods", "-n", NAMESPACE, "-o", "wide"])
 
 
-# Collect pod describe output
-def get_events(pod_name, namespace="fss-clu"):
-    result = subprocess.run(
-        ["kubectl", "describe", "pod", pod_name, "-n", namespace],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+def get_services():
+    return run_cmd(["kubectl", "get", "svc", "-n", NAMESPACE])
 
 
-# Get all pods
-def get_pods(namespace="fss-clu"):
-    result = subprocess.run(
-        ["kubectl", "get", "pods", "-n", namespace],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+def get_deployments():
+    return run_cmd(["kubectl", "get", "deployments", "-n", NAMESPACE])
 
 
-# Get cluster events
-def get_k8s_events(namespace="fss-clu"):
-    result = subprocess.run(
-        [
-            "kubectl",
-            "get",
-            "events",
-            "-n",
-            namespace,
-            "--sort-by=.lastTimestamp",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+def get_endpoints():
+    return run_cmd(["kubectl", "get", "endpoints", "-n", NAMESPACE])
 
 
-# Deployment rollout history
-def get_rollout_history(namespace="fss-clu"):
-    result = subprocess.run(
-        [
-            "kubectl",
-            "rollout",
-            "history",
-            "deployment/retail-app-deployment",
-            "-n",
-            namespace,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+def get_events():
+    return run_cmd(["kubectl", "get", "events", "-n", NAMESPACE, "--sort-by=.lastTimestamp"])
 
 
-# Analyze using Groq
-def analyze_with_groq(data, scenario):
+def get_top_pods():
+    return run_cmd(["kubectl", "top", "pods", "-n", NAMESPACE])
+
+
+def get_logs(pod):
+    return run_cmd(["kubectl", "logs", pod, "-n", NAMESPACE, "--tail=100"])
+
+
+def get_previous_logs(pod):
+    return run_cmd([
+        "kubectl", "logs", pod, "-n", NAMESPACE,
+        "--previous", "--tail=100"
+    ])
+
+
+# -----------------------------
+# POD DETECTION
+# -----------------------------
+def get_retail_pod():
+    pod = run_cmd([
+        "kubectl", "get", "pods",
+        "-n", NAMESPACE,
+        "-l", "app=retail",
+        "-o", "jsonpath={.items[0].metadata.name}"
+    ])
+    return pod if pod else None
+
+
+# -----------------------------
+# INCIDENT DETECTION (REAL ONLY)
+# -----------------------------
+def detect_issues(pods, endpoints, deployments):
+    issues = []
+
+    if "CrashLoopBackOff" in pods:
+        issues.append("CrashLoopBackOff detected")
+
+    if "ImagePullBackOff" in pods or "ErrImagePull" in pods:
+        issues.append("Image pull failure detected")
+
+    if "0/1" in pods or "0/2" in pods:
+        issues.append("Pod not ready")
+
+    if "retail-app-service" in endpoints and "<none>" in endpoints:
+        issues.append("Service has no endpoints")
+
+    if "0/1" in deployments:
+        issues.append("Deployment not fully available")
+
+    return issues
+
+
+# -----------------------------
+# GROQ ANALYSIS
+# -----------------------------
+def analyze_with_groq(evidence, issues):
     api_key = os.environ.get("GROQ_API_KEY")
 
     if not api_key:
-        return (
-            "\nERROR: GROQ_API_KEY environment variable not found.\n"
-            "Set it using:\n"
-            "export GROQ_API_KEY='your-key'\n"
-            "or\n"
-            "$env:GROQ_API_KEY='your-key'\n"
-        )
+        return "ERROR: GROQ_API_KEY not set"
 
-    try:
-        client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key)
 
-        prompt = f"""
-You are a Senior Kubernetes SRE and Production Troubleshooting Expert.
+    prompt = f"""
+You are a Senior Kubernetes SRE.
 
-Scenario:
-{scenario}
+Analyze ONLY real evidence.
+Do NOT assume incidents.
 
-Kubernetes Diagnostic Data:
-{data}
+If issues list is empty, respond:
+"Cluster is healthy - no active incidents"
 
-Provide:
+If issues exist, provide:
 
-1. Executive Summary
-2. Most Likely Root Cause
-3. Supporting Evidence
-4. Step-by-Step Fix
-5. kubectl Commands to Validate
-6. Preventive Measures
-7. Severity Level (Low/Medium/High/Critical)
+1. Detected Issues
+2. Root Cause (only if supported by evidence)
+3. Evidence
+4. Fix Steps
+5. kubectl validation commands
+6. Severity (Low/Medium/High/Critical)
+
+ISSUES:
+{issues}
+
+EVIDENCE:
+{json.dumps(evidence, indent=2)}
 """
 
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert Kubernetes production "
-                        "troubleshooter specializing in EKS, AKS, "
-                        "GKE, OpenShift, and cloud-native systems."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0.2,
-            max_tokens=2000,
-        )
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a Kubernetes production SRE. Be strict, factual, and never hallucinate."
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+        max_tokens=1500,
+    )
 
-        return response.choices[0].message.content
-
-    except Exception as e:
-        return f"Groq API Error: {e}"
+    return response.choices[0].message.content
 
 
-# Scenario 1
-def scenario1_app_unavailable(pod_name):
+# -----------------------------
+# MAIN AGENT
+# -----------------------------
+def main():
     print("\n" + "=" * 80)
-    print("SCENARIO 1: Retail App Unavailable After Deployment")
+    print("KUBERNETES AI SRE AGENT (EVIDENCE-DRIVEN)")
     print("=" * 80)
+
+    pod = get_retail_pod()
 
     pods = get_pods()
-    logs = get_logs(pod_name)
-    events = get_k8s_events()
+    services = get_services()
+    deployments = get_deployments()
+    endpoints = get_endpoints()
+    events = get_events()
+    metrics = get_top_pods()
 
-    data = f"""
-Pods:
-{pods}
+    logs = get_logs(pod) if pod else "No pod found"
+    prev_logs = get_previous_logs(pod) if pod else "No pod found"
 
-Logs:
-{logs}
+    issues = detect_issues(pods, endpoints, deployments)
 
-Events:
-{events}
-"""
+    evidence = {
+        "pods": pods,
+        "services": services,
+        "deployments": deployments,
+        "endpoints": endpoints,
+        "events": events[-2000:],  # limit size
+        "metrics": metrics,
+        "logs": logs,
+        "previous_logs": prev_logs,
+    }
 
-    print(
-        analyze_with_groq(
-            data,
-            "Retail application unavailable after deployment",
-        )
-    )
+    print("\nDetected Issues:", issues)
 
-
-# Scenario 2
-def scenario2_slow_checkout(pod_name):
     print("\n" + "=" * 80)
-    print("SCENARIO 2: Slow Checkout Response")
+    print(analyze_with_groq(evidence, issues))
     print("=" * 80)
 
-    logs = get_logs(pod_name)
-    events = get_events(pod_name)
 
-    data = f"""
-Logs:
-{logs}
-
-Pod Details:
-{events}
-"""
-
-    print(
-        analyze_with_groq(
-            data,
-            "Customers report slow checkout response and high latency",
-        )
-    )
-
-
-# Scenario 3
-def scenario3_pod_restart(pod_name):
-    print("\n" + "=" * 80)
-    print("SCENARIO 3: CrashLoopBackOff")
-    print("=" * 80)
-
-    logs = get_logs(pod_name)
-    events = get_events(pod_name)
-
-    data = f"""
-Logs:
-{logs}
-
-Pod Events:
-{events}
-"""
-
-    print(
-        analyze_with_groq(
-            data,
-            "Pods continuously restarting with CrashLoopBackOff",
-        )
-    )
-
-
-# Scenario 4
-def scenario4_errors_after_release(pod_name):
-    print("\n" + "=" * 80)
-    print("SCENARIO 4: Errors Increased After New Release")
-    print("=" * 80)
-
-    logs = get_logs(pod_name)
-    history = get_rollout_history()
-    events = get_k8s_events()
-
-    data = f"""
-Deployment History:
-{history}
-
-Error Logs:
-{logs}
-
-Cluster Events:
-{events}
-"""
-
-    print(
-        analyze_with_groq(
-            data,
-            "Production errors increased after a new release. "
-            "Possible regression or deployment issue.",
-        )
-    )
-
-
-# Main
 if __name__ == "__main__":
-    print("\nInitializing FSS Retail AI-Driven Troubleshooting Agent (Groq)...\n")
-
-    pod = get_retail_pod_name()
-
-    scenario1_app_unavailable(pod)
-    scenario2_slow_checkout(pod)
-    scenario3_pod_restart(pod)
-    scenario4_errors_after_release(pod)
+    main()
