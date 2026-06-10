@@ -267,3 +267,18 @@ kubectl get ns
 kubectl get pods -n fss-clu -l app=retail
 11. Run the AI Troubleshooter
 python3 agent.py
+
+
+
+
+
+[10:39 am, 9/6/2026] +91 75054 00599: helm upgrade datadog-agent datadog/datadog \
+  --set datadog.apiKey=acdbf3310c092ec3db4159b4e82ecff5 \
+  --set datadog.site=us5.datadoghq.com \
+  --set datadog.logs.enabled=true \
+  --set datadog.logs.containerCollectAll=true \
+  --set datadog.apm.enabled=true \
+  --set datadog.processAgent.enabled=true \
+  --namespace default
+[10:40 am, 9/6/2026] +91 75054 00599: kubectl delete pod -l app=datadog-agent
+kubectl get pods -l app=datadog-agent
